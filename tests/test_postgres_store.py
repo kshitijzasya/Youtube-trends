@@ -21,6 +21,31 @@ def test_safe_location_hides_credentials():
     assert safe_location(url) == "aws-0-ap-south-1.pooler.supabase.com:5432/postgres"
 
 
+def test_raw_at_in_password_never_leaks_and_is_explained():
+    url = "postgresql://postgres:[Pass@3518]@db.abcdefghijklmnop.supabase.co:5432/postgres"
+
+    assert safe_location(url) == "db.abcdefghijklmnop.supabase.co:5432/postgres"
+    with pytest.raises(StoreConnectionError) as exc:
+        PostgresStore(url)
+    message = str(exc.value)
+    assert "Pass" not in message and "3518" not in message
+    assert "%40" in message and "brackets" in message and "Session pooler" in message
+
+
+def test_scrub_removes_credential_fragments():
+    from yt_trends.postgres_store import _scrub
+    url = "postgresql://postgres.ref:abc@def@host:5432/postgres"
+    assert _scrub('could not translate host name "def@host"; password abc@def', url) == \
+        'could not translate host name "***@host"; password ***'
+
+
+def test_pooler_url_has_no_problems():
+    from yt_trends.postgres_store import _url_problems
+    good = "postgresql://postgres.abcd:Letters123@aws-0-ap-south-1.pooler.supabase.com:5432/postgres"
+    encoded = "postgresql://postgres.abcd:Pass%403518@aws-0-ap-south-1.pooler.supabase.com:5432/postgres"
+    assert _url_problems(good) == [] and _url_problems(encoded) == []
+
+
 def test_invalid_schema_rejected():
     with pytest.raises(ValueError, match="invalid schema"):
         PostgresStore("postgresql://x@localhost/db", schema="Robert'); DROP TABLE")

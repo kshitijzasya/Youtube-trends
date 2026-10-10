@@ -67,13 +67,60 @@ class StoreConnectionError(RuntimeError):
     """Raised when the database cannot be reached (message never contains the password)."""
 
 
+def _split_url(url: str) -> tuple[str, str, str]:
+    """(userinfo, host[:port], dbname) of a postgres:// URL, splitting at the LAST '@'.
+
+    Splitting at the last '@' keeps a password containing a raw '@' out of the host part.
+    """
+    rest = url.split("://", 1)[1]
+    netloc, _, path = rest.partition("/")
+    userinfo, _, hostport = netloc.rpartition("@")
+    return userinfo, hostport, path.split("?", 1)[0] or "?"
+
+
 def safe_location(url: str) -> str:
     """host:port/dbname for logs, without credentials."""
+    if "://" in url:
+        _, hostport, dbname = _split_url(url)
+        return f"{hostport}/{dbname}"
     try:
         info = conninfo_to_dict(url)
     except psycopg.ProgrammingError:
         return "<unparseable DATABASE_URL>"
     return f"{info.get('host', '?')}:{info.get('port', '5432')}/{info.get('dbname', '?')}"
+
+
+def _scrub(text: str, url: str) -> str:
+    """Remove the URL's credentials (and any fragment of them) from a message."""
+    if "://" in url:
+        userinfo = _split_url(url)[0]
+        secrets = [userinfo, userinfo.partition(":")[2], *re.split(r"[:@]", userinfo)]
+    else:
+        try:
+            secrets = [conninfo_to_dict(url).get("password") or ""]
+        except psycopg.ProgrammingError:
+            secrets = []
+    for secret in sorted(secrets, key=len, reverse=True):
+        if len(secret) >= 3:
+            text = text.replace(secret, "***")
+    return text
+
+
+def _url_problems(url: str) -> list[str]:
+    """Common Supabase connection-string mistakes, as human-readable hints."""
+    if "://" not in url:
+        return []
+    problems = []
+    userinfo, hostport, _ = _split_url(url)
+    if "@" in userinfo:
+        problems.append("the password contains a raw '@' - URL-encode it as %40 (or use a password "
+                        "of letters and digits only)")
+    if "[" in userinfo or "]" in userinfo:
+        problems.append("remove the [ ] brackets around the password (they were part of the placeholder)")
+    if re.match(r"^db\.[a-z0-9]+\.supabase\.co(:\d+)?$", hostport):
+        problems.append("this is Supabase's Direct connection (IPv6-only, fails on GitHub Actions) - "
+                        "use the Session pooler string instead")
+    return problems
 
 
 class PostgresStore:
@@ -84,6 +131,9 @@ class PostgresStore:
             raise ValueError(f"invalid schema name {schema!r}: use lowercase letters, digits and _")
         self.schema = schema
         self._location = safe_location(url)
+        problems = _url_problems(url)
+        if problems:
+            raise StoreConnectionError(f"DATABASE_URL for {self._location} looks wrong: " + "; ".join(problems))
         try:
             # prepare_threshold=None: no server-side prepared statements, so both Supabase
             # pooler modes (session :5432 and transaction :6543) work.
@@ -91,7 +141,7 @@ class PostgresStore:
                                          application_name="yt-trends")
         except psycopg.Error as exc:
             reason = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
-            raise StoreConnectionError(f"cannot connect to {self._location}: {reason}") from None
+            raise StoreConnectionError(_scrub(f"cannot connect to {self._location}: {reason}", url)) from None
         self._names = {"schema": sql.Identifier(schema),
                        **{t: sql.Identifier(schema, t) for t in TABLES}}
         self._conn.execute(self._q(DDL))
