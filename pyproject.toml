@@ -1,0 +1,9 @@
+[project]
+name = "yt-trends"
+version = "1.0.0"
+description = "Daily YouTube niche trend tracker that posts the top topics to Slack"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

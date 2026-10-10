@@ -1,0 +1,38 @@
+# yt-trends configuration.
+# Behaviour lives here; secrets (API keys, webhooks) live in environment variables.
+
+settings:
+  db_path: data/trends.db      # SQLite history, used only when DATABASE_URL is not set
+  db_schema: yt_trends         # Postgres/Supabase schema for the tables (when DATABASE_URL is set)
+  quota_budget: 8000           # YouTube units per run (free daily quota is 10,000)
+  novelty_days: 7              # topics reported within this window count as "ongoing"
+  retention_days: 30          # older snapshots/reports are pruned
+
+llm:
+  providers: [gemini]    # tried in order; keyword clustering is the final fallback
+  gemini_model: gemini-3.8-flash          # check https://aistudio.google.com for current free models
+  temperature: 0.4
+
+niches:
+  - name: my-niche                         # shown in the Slack header
+    channels:                              # up to ~10 tracked channels: @handle, handle, URL or UC... id
+      - "@channel1"
+      - "@channel2"
+    search_keywords:                       # each keyword costs 100 quota units per run
+      - "keyword one"
+      - "keyword two"
+    lookback_hours: 72                     # only videos published within this window are candidates
+    topics: 5                              # topics posted to Slack
+    candidate_videos: 15                   # best-scoring videos sent to the LLM for clustering
+    min_duration_sec: 10                   # 0 = include Shorts
+    search_results_per_keyword: 15
+    max_discovered_channels: 30            # non-tracked channels found via search (2 units each)
+    comments_per_video: 10
+    region_code: IN                        # optional ISO country code for search, or null
+    language: en                           # optional search/autocomplete language, or null
+    slack_webhook_env: SLACK_WEBHOOK_URL   # env var holding this niche's webhook
+    weights:                               # topic ranking weights (relative, any scale)
+      performance: 0.4                     # how hard the topic's videos beat their channel's normal
+      coverage: 0.25                       # how many different channels cover it
+      novelty: 0.2                         # not reported in the last novelty_days
+      search_demand: 0.15                  # matches what people type into YouTube search

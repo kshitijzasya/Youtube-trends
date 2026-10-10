@@ -1,0 +1,85 @@
+name: daily-trends
+
+on:
+  schedule:
+    - cron: "30 3 * * *"   # 03:30 UTC = 09:00 IST. GitHub may start scheduled runs a few minutes late.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Print the report in the log instead of posting to Slack"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths-ignore: ["data/**", "**.md"]
+
+permissions:
+  contents: write   # only used to commit data/trends.db when Supabase is not configured
+
+concurrency:
+  group: daily-trends
+  cancel-in-progress: false
+
+jobs:
+  trends:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      USE_SUPABASE: ${{ secrets.DATABASE_URL != '' }}
+
+    services:
+      postgres:   # throwaway database for the test suite only
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 3s --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build test image
+        run: docker build --target test -t yt-trends:test .
+
+      - name: Run tests (SQLite + Postgres)
+        run: |
+          docker run --rm --network host \
+            -e TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres \
+            yt-trends:test
+
+      - name: Build runtime image
+        if: github.event_name != 'push'
+        run: docker build --target runtime -t yt-trends:latest .
+
+      - name: Run pipeline
+        if: github.event_name != 'push'
+        env:
+          YT_API_KEY: ${{ secrets.YT_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DRY_RUN: ${{ inputs.dry_run && '--dry-run' || '' }}
+        run: |
+          mkdir -p data
+          # Run as the runner's uid so the container can write to data/ (SQLite fallback).
+          # Add another "-e NAME" for each extra niche webhook you configure.
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            -e YT_API_KEY -e GEMINI_API_KEY -e GROQ_API_KEY -e SLACK_WEBHOOK_URL -e DATABASE_URL \
+            -v "$PWD/data:/app/data" \
+            -v "$PWD/config.yaml:/app/config.yaml:ro" \
+            -v "$PWD/prompts:/app/prompts:ro" \
+            yt-trends:latest $DRY_RUN
+
+      - name: Save SQLite history (only without Supabase)
+        if: always() && github.event_name != 'push' && env.USE_SUPABASE != 'true'
+        run: |
+          [ -f data/trends.db ] || exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/trends.db
+          git diff --cached --quiet && exit 0
+          git commit -m "chore: update trend history [skip ci]"
+          git push
