@@ -52,7 +52,7 @@ class LlmConfig:
     """LLM provider order and model names."""
 
     providers: tuple[str, ...] = KNOWN_PROVIDERS
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.8-flash"
     groq_model: str = "llama-3.3-70b-versatile"
     temperature: float = 0.4
 
