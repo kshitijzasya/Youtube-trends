@@ -16,11 +16,17 @@ llm:
 niches:
   - name: my-niche                         # shown in the Slack header
     channels:                              # up to ~10 tracked channels: @handle, handle, URL or UC... id
-      - "@channel1"
-      - "@channel2"
+      - "@DEFTALKSbyAadi"
+      - "@SrijanKalam"
+      - "@TarunBindlish"
+      - "@DefenceDetective"
+      - "@wwidous4494"
+      - "@OddFrameFilms67"
+      - "@ZeihanonGeopolitics"
+      - "@DDIndia"
     search_keywords:                       # each keyword costs 100 quota units per run
-      - "keyword one"
-      - "keyword two"
+      - "Missile"
+      - "war"
     lookback_hours: 72                     # only videos published within this window are candidates
     topics: 5                              # topics posted to Slack
     candidate_videos: 15                   # best-scoring videos sent to the LLM for clustering
