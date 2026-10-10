@@ -15,9 +15,9 @@ def write(tmp_path, text):
 
 
 def test_shipped_config_is_valid():
+    """config.yaml is user-edited, so only check that it loads and validates, not specific values."""
     config = load_config(ROOT / "config.yaml")
-    assert config.niches[0].topics == 5
-    assert config.llm.providers == ("gemini")
+    assert config.niches
 
 
 def test_unknown_key_is_rejected(tmp_path):
