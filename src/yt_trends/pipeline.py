@@ -148,7 +148,7 @@ def run_niche(niche: NicheConfig, config: AppConfig, deps: Deps) -> NicheResult:
         try:
             topics = cluster_with_llm(deps.llm, pool, niche.name, niche.topics * 2,
                                       load_prompt(deps.prompts_dir, "cluster"))
-            clustered_by = deps.llm.name
+            clustered_by = getattr(deps.llm, "last_used", None) or deps.llm.name
         except LlmError as exc:
             log.warning("LLM clustering failed, using keywords: %s", exc)
     if not topics:

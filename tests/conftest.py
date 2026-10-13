@@ -95,6 +95,7 @@ class FakeResponse:
         self.status_code = status
         self._payload = payload
         self.text = text
+        self.headers = {}
 
     def json(self):
         if self._payload is None:

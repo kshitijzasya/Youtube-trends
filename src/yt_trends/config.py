@@ -53,6 +53,7 @@ class LlmConfig:
 
     providers: tuple[str, ...] = KNOWN_PROVIDERS
     gemini_model: str = "gemini-3.8-flash"
+    gemini_fallback_models: tuple[str, ...] = ()  # tried in order when gemini_model is overloaded
     groq_model: str = "llama-3.3-70b-versatile"
     temperature: float = 0.4
 
@@ -140,8 +141,9 @@ def load_config(path: str | Path) -> AppConfig:
 
     settings = dict(raw.get("settings") or {})
     llm_raw = dict(raw.get("llm") or {})
-    if "providers" in llm_raw:
-        llm_raw["providers"] = tuple(llm_raw["providers"] or ())
+    for key in ("providers", "gemini_fallback_models"):
+        if key in llm_raw:
+            llm_raw[key] = tuple(str(v) for v in llm_raw[key] or ())
     llm = _build(LlmConfig, llm_raw, "llm")
     bad = [p for p in llm.providers if p not in KNOWN_PROVIDERS]
     if bad:

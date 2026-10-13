@@ -89,8 +89,66 @@ def test_fallback_uses_next_provider():
 
 def test_build_llm_respects_keys_and_order():
     assert build_llm(LlmConfig(), Secrets("yt"), FakeSession()) is None
-    chain = build_llm(LlmConfig(providers=("groq", "gemini")), Secrets("yt", "gk", "qk"), FakeSession())
-    assert [c.name for c in chain.clients] == ["groq", "gemini"]
+    config = LlmConfig(providers=("groq", "gemini"), gemini_model="g-main",
+                       gemini_fallback_models=("g-backup", "g-main"))  # duplicate ignored
+    chain = build_llm(config, Secrets("yt", "gk", "qk"), FakeSession())
+    assert [c.name for c in chain.clients] == ["groq", "gemini:g-main", "gemini:g-backup"]
+    only_gemini = build_llm(config, Secrets("yt", "gk"), FakeSession())  # no groq key
+    assert [c.name for c in only_gemini.clients] == ["gemini:g-main", "gemini:g-backup"]
+
+
+GEMINI_OK = {"candidates": [{"content": {"parts": [{"text": '{"ok": true}'}]}}]}
+
+
+@pytest.fixture
+def no_sleep(monkeypatch):
+    """Record retry waits instead of sleeping."""
+    waits = []
+    monkeypatch.setattr("yt_trends.llm._sleep", waits.append)
+    return waits
+
+
+def test_overload_is_retried_then_succeeds(no_sleep):
+    session = FakeSession(FakeResponse(503, text="overloaded"), FakeResponse(503, text="overloaded"),
+                          FakeResponse(payload=GEMINI_OK))
+    assert GeminiClient("k", "m", 0.4, session).complete_json("p") == {"ok": True}
+    assert no_sleep == [5, 15]
+
+
+def test_gives_up_after_three_attempts(no_sleep):
+    session = FakeSession(*[FakeResponse(503, text="overloaded")] * 3)
+    with pytest.raises(LlmError, match=r"HTTP 503.*after 3 attempts"):
+        GeminiClient("k", "m", 0.4, session).complete_json("p")
+    assert len(session.requests) == 3
+
+
+def test_client_errors_are_not_retried(no_sleep):
+    session = FakeSession(FakeResponse(400, text="bad request"))
+    with pytest.raises(LlmError, match="HTTP 400"):
+        GeminiClient("k", "m", 0.4, session).complete_json("p")
+    assert no_sleep == []
+
+
+def test_retry_after_header_is_respected_and_capped(no_sleep):
+    slow = FakeResponse(429, text="rate limited")
+    slow.headers = {"Retry-After": "999"}
+    session = FakeSession(slow, FakeResponse(payload=GEMINI_OK))
+    GeminiClient("k", "m", 0.4, session).complete_json("p")
+    assert no_sleep == [60]
+
+
+def test_network_blip_is_retried(no_sleep):
+    import requests
+    session = FakeSession(requests.ConnectionError("reset"), FakeResponse(payload=GEMINI_OK))
+    assert GeminiClient("k", "m", 0.4, session).complete_json("p") == {"ok": True}
+
+
+def test_fallback_records_which_model_answered(no_sleep):
+    main = GeminiClient("k", "main", 0.4, FakeSession(*[FakeResponse(503, text="busy")] * 3))
+    backup = GeminiClient("k", "backup", 0.4, FakeSession(FakeResponse(payload=GEMINI_OK)))
+    chain = FallbackLlm([main, backup])
+    assert chain.complete_json("p") == {"ok": True}
+    assert chain.last_used == "gemini:backup"
 
 
 def test_gemini_sends_key_in_header_not_url():

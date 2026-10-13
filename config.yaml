@@ -11,6 +11,7 @@ settings:
 llm:
   providers: [gemini]    # tried in order; keyword clustering is the final fallback
   gemini_model: gemini-3.8-flash          # check https://aistudio.google.com for current free models
+  gemini_fallback_models: [gemini-2.5-flash, gemini-flash-latest]   # tried in order if the main model is overloaded (HTTP 503)
   temperature: 0.4
 
 niches:
@@ -27,7 +28,9 @@ niches:
     search_keywords:                       # each keyword costs 100 quota units per run
       - "Missile"
       - "war"
-    lookback_hours: 72                     # only videos published within this window are candidates
+      - "weapons"
+      - "technology"
+    lookback_hours: 48                     # only videos published within this window are candidates
     topics: 5                              # topics posted to Slack
     candidate_videos: 15                   # best-scoring videos sent to the LLM for clustering
     min_duration_sec: 10                   # 0 = include Shorts
